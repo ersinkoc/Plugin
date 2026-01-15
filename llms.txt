@@ -1,0 +1,283 @@
+# @oxog/plugin LLM Documentation
+
+## Package Identity
+
+**npm:** `@oxog/plugin`
+**GitHub:** `https://github.com/ersinkoc/plugin`
+**Website:** `https://plugin.oxog.dev`
+**Author:** Ersin Koç
+**License:** MIT
+
+## Overview
+
+Micro-kernel plugin system for the @oxog ecosystem. Features: typed events, lifecycle hooks (install → init → destroy), automatic dependency resolution via topological sort, configurable error boundaries (isolate/fail-fast/collect), shared context management, and fluent chainable API.
+
+**Runtime:** Universal (Node.js >= 18, modern browsers)
+**Module:** ESM + CJS
+**Bundle:** < 4KB gzipped core, < 6KB total
+**Dependencies:** ONLY `@oxog/types` at runtime
+
+## Quick Start
+
+```typescript
+import { createKernel } from '@oxog/plugin';
+
+// Create kernel
+const kernel = createKernel();
+
+// Register plugin
+kernel.use({
+  name: 'logger',
+  version: '1.0.0',
+  install(kernel) {
+    kernel.log = (...args) => console.log(...args);
+  }
+});
+
+// Initialize
+await kernel.init();
+
+// Use plugin
+(kernel as any).log('Hello!');
+
+// Cleanup
+await kernel.destroy();
+```
+
+## Core API
+
+### createKernel<TContext, TEvents>(options?)
+
+Factory function creating KernelInstance.
+
+**Options:**
+- `context?: TContext` - Initial shared context
+- `errorStrategy?: 'isolate' | 'fail-fast' | 'collect'` - Default 'isolate'
+- `onError?(error, pluginName)` - Global error handler
+- `onBeforeInit?()`, `onAfterInit?()` - Init hooks
+- `onBeforeDestroy?()`, `onAfterDestroy?()` - Destroy hooks
+
+### KernelInstance Methods
+
+**Registration:**
+- `use(plugin): this` - Register plugin, calls `install()` sync
+- `useAll(plugins[]): this` - Batch register
+
+**Lifecycle:**
+- `init(): Promise<void>` - Sort by deps, call `onInit()` in order
+- `destroy(): Promise<void>` - Call `onDestroy()` in reverse order
+- `isInitialized(): boolean` - State check
+- `isDestroyed(): boolean` - State check
+
+**Queries:**
+- `getPlugin<T>(name): T | undefined` - Get plugin
+- `hasPlugin(name): boolean` - Check existence
+- `listPlugins(): Plugin[]` - All plugins
+- `getPluginNames(): string[]` - All names
+- `getDependencyGraph(): Record<string, string[]>` - Dep map
+
+**Events:**
+- `on<K>(event, handler): Unsubscribe` - Subscribe
+- `once<K>(event, handler): Unsubscribe` - One-time
+- `emit<K>(event, payload): void` - Emit
+- `off<K>(event, handler): void` - Unsubscribe
+- `onWildcard(handler): Unsubscribe` - All events
+- `onPattern(pattern, handler): Unsubscribe` - Like 'user:*'
+
+**Context:**
+- `getContext(): TContext` - Get shared state
+- `updateContext(partial): void` - Merge partial
+
+**Dynamic:**
+- `unregister(name): Promise<boolean>` - Remove plugin
+- `replace(plugin): Promise<void>` - Swap plugin
+- `reload(name): Promise<void>` - Re-init plugin
+
+## Plugin Interface
+
+```typescript
+interface Plugin<TContext> {
+  name: string;              // Unique identifier
+  version: string;           // Semver
+  dependencies?: string[];   // Required plugins
+
+  install(kernel: Kernel<TContext>): void;  // Called on use()
+  onInit?(context: TContext): MaybePromise<void>;  // After deps ready
+  onDestroy?(): MaybePromise<void>;  // On destroy/unregister
+  onError?(error: Error): void;  // On plugin error
+}
+```
+
+## Lifecycle Order
+
+Given: A (no deps), B (deps: [A]), C (deps: [B])
+
+**Init order:** A → B → C
+**Destroy order:** C → B → A
+
+## Dependency Resolution
+
+Uses Kahn's algorithm for topological sort. Throws PluginError on:
+- Circular dependencies: `A → B → A`
+- Missing dependencies: plugin requires unregistered plugin
+
+## Event System
+
+**Typed events:** Requires EventMap interface
+
+```typescript
+interface Events {
+  'user:login': { userId: string; timestamp: number };
+}
+const kernel = createKernel<{}, Events>();
+kernel.on('user:login', (p) => console.log(p.userId)); // Type safe
+```
+
+**Wildcard/pattern:**
+- `'*'` - All events
+- `'prefix:*'` - Events starting with prefix
+
+**Handler errors:** Caught silently, don't affect other handlers
+
+## Error Strategies
+
+**'isolate' (default):**
+- Catches plugin errors
+- Calls plugin `onError()` then global `onError()`
+- Continues initializing other plugins
+
+**'fail-fast':**
+- Throws immediately on first error
+- Stops initialization
+
+**'collect':**
+- Collects all errors
+- Continues initializing
+- Throws `AggregateError` at end
+
+## Context Management
+
+Shared mutable object passed to all `onInit()` hooks.
+
+```typescript
+interface Context { config: { api: string } };
+const kernel = createKernel<Context>({
+  context: { config: { api: 'https://api.example.com' } }
+});
+
+// Plugin reads/modifies
+plugin: {
+  async onInit(context) {
+    console.log(context.config.api);
+    context.config.api = 'https://new.api';
+  }
+}
+```
+
+**updateContext():** Shallow merge, not deep.
+
+## Plugin Factories
+
+```typescript
+import { definePlugin } from '@oxog/plugin';
+
+const createLogger = definePlugin((options: { level: string }) => ({
+  name: 'logger',
+  version: '1.0.0',
+  install(kernel) {
+    kernel.logLevel = options.level;
+  }
+}));
+
+kernel.use(createLogger({ level: 'info' }));
+```
+
+## Kernel Events
+
+Built-in events emitted:
+- `'kernel:init'` - { timestamp }
+- `'kernel:ready'` - { timestamp, plugins: string[] }
+- `'kernel:destroy'` - { timestamp }
+- `'kernel:destroyed'` - { timestamp }
+- `'plugin:install'` - { name, version }
+- `'plugin:init'` - { name }
+- `'plugin:destroy'` - { name }
+- `'plugin:error'` - { name, error }
+
+## Dynamic Management
+
+**Add after init:** Auto-initializes immediately.
+
+**unregister():** Calls `onDestroy()` if inited, then removes.
+
+**replace():** Unregister + register + init if ready.
+
+**reload():** Call `onDestroy()` then `onInit()` on same plugin.
+
+## Type Exports
+
+From `@oxog/types`:
+- `Plugin<TContext>`
+- `Kernel<TContext>`
+- `PluginError`
+- `MaybePromise<T>`
+- `Unsubscribe`
+- `EventMap`
+
+From `@oxog/plugin`:
+- `KernelState` enum: Created, Initializing, Ready, Destroying, Destroyed
+- `ErrorStrategy`: 'isolate' | 'fail-fast' | 'collect'
+- `PluginFactory<T, TOptions>`
+
+## Bundle Output
+
+```
+dist/
+  index.js       # ESM
+  index.cjs      # CJS
+  index.d.ts     # Types
+```
+
+Build with `tsup` - treeshaken, minified, ES2022 target.
+
+## Patterns
+
+**Chain registration:**
+```typescript
+kernel.use(p1).use(p2).use(p3);
+await kernel.init();
+```
+
+**Cross-plugin comms:**
+```typescript
+// Publisher
+kernel.emit('data:update', { key: 'x', value: 1 });
+
+// Subscriber
+kernel.on('data:update', ({ key, value }) => {
+  console.log(key, value);
+});
+```
+
+**Conditional loading:**
+```typescript
+if (featureEnabled) {
+  await kernel.use(featurePlugin);
+}
+```
+
+## Constraints
+
+- NO external runtime dependencies (only @oxog/types)
+- NO plugin hot-reloading (file watching)
+- NO remote plugin loading
+- NO plugin sandboxing
+- NO version conflict resolution
+
+## Testing
+
+100% coverage required. Tests in `tests/` with Vitest.
+
+Unit: `tests/unit/*.test.ts`
+Integration: `tests/integration/*.test.ts`
+Fixtures: `tests/fixtures/test-plugins.ts`

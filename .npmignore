@@ -1,0 +1,31 @@
+# Source files
+src/
+tests/
+examples/
+website/
+docs/
+coverage/
+
+# Config files
+.github/
+.oxog/
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+eslint.config.js
+.prettierrc
+.gitignore
+llms.txt
+
+# Development files
+*.test.ts
+*.spec.ts
+.env*
+.DS_Store
+Thumbs.db
+
+# Lock files (npm will use package-lock.json from the registry)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
