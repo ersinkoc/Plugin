@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { KernelInstance } from '../../src/kernel';
-import { PluginError } from '@oxog/types';
+import { PluginError } from '../../src/index.js';
 import { createTestPlugin, createFailingPlugin } from '../fixtures/test-plugins';
 
 interface TestContext {

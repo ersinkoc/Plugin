@@ -4,8 +4,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { createKernel } from '../../src/index';
-import type { Plugin, EventMap } from '@oxog/types';
-import { PluginError } from '@oxog/types';
+import type { Plugin, EventMap } from '../../src/index.js';
+import { PluginError } from '../../src/index.js';
 
 interface TestContext {
   errors?: string[];

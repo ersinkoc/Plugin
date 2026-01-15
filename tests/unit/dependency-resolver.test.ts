@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { DependencyResolver } from '../../src/dependency-resolver';
-import { PluginError } from '@oxog/types';
+import { PluginError } from '../../src/index.js';
 
 describe('DependencyResolver', () => {
   describe('addPlugin', () => {

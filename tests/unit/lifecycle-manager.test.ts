@@ -6,7 +6,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { LifecycleManager } from '../../src/lifecycle-manager';
 import { ErrorBoundary } from '../../src/error-boundary';
 import type { InternalPlugin } from '../../src/types';
-import type { Plugin } from '@oxog/types';
+import type { Plugin } from '../../src/index.js';
 
 describe('LifecycleManager', () => {
   const createInternalPlugin = (

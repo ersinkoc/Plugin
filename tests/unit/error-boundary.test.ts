@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ErrorBoundary } from '../../src/error-boundary';
-import type { Plugin } from '@oxog/types';
+import type { Plugin } from '../../src/index.js';
 
 describe('ErrorBoundary', () => {
   const createMockPlugin = (

@@ -27,11 +27,11 @@ export { definePlugin } from './helpers.js';
 // Type exports
 export type { ErrorStrategy, PluginFactory } from './types.js';
 
-// Type re-exports from @oxog/types
+// Re-exports from @oxog/types
+export { PluginError } from '@oxog/types';
 export type {
   Plugin,
   Kernel,
-  PluginError,
   MaybePromise,
   Unsubscribe,
   EventMap

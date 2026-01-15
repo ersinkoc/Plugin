@@ -4,7 +4,7 @@
  * @module fixtures/test-plugins
  */
 
-import type { Plugin } from '@oxog/types';
+import type { Plugin } from '../../src/index.js';
 
 /**
  * Create a simple test plugin.
