@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-01-16
+
+### Added
+
+- **Late Plugin Initialization Control**
+  - `waitForPlugin(name)` - Wait for specific plugin to complete initialization
+  - `waitForAll()` - Wait for all pending plugin initializations
+  - Useful when adding plugins after `init()` and need to ensure they're ready
+
+- **Handler Deduplication**
+  - Event bus now prevents duplicate handler registration
+  - Same handler registered multiple times will only be called once per event
+  - Applies to `on()`, `onWildcard()`, and `onPattern()` methods
+
+- **Plugin Error Events**
+  - `plugin:error` event now emitted when plugin initialization fails
+  - Payload includes `{ name: string; error: Error }`
+
+### Fixed
+
+- **Race Condition in Late Plugin Initialization**
+  - Plugins added after `init()` now properly tracked with pending promises
+  - `replace()` now waits for pending initialization instead of double-initializing
+
+### Changed
+
+- Improved internal type safety with `InternalKernelEvents` interface
+- Removed redundant error conversion in catch blocks (ErrorBoundary handles this)
+- Documentation updates for new methods and events
+
+### Technical Details
+
+- 212 tests with 100% coverage
+- No breaking changes from 1.0.0
+
 ## [1.0.0] - 2026-01-15
 
 ### Added
@@ -69,4 +104,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - < 4KB gzipped core bundle
 - 100% test coverage (210 tests)
 
+[1.0.1]: https://github.com/ersinkoc/plugin/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ersinkoc/plugin/releases/tag/v1.0.0

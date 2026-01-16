@@ -2,7 +2,7 @@ export const PACKAGE_NAME = '@oxog/plugin';
 export const PACKAGE_SHORT_NAME = 'plugin';
 export const GITHUB_REPO = 'ersinkoc/plugin';
 export const NPM_PACKAGE = '@oxog/plugin';
-export const VERSION = '1.0.0';
+export const VERSION = '1.0.1';
 export const DESCRIPTION = 'Micro-kernel plugin system for the @oxog ecosystem with typed events, lifecycle hooks, and dependency resolution.';
 export const DOMAIN = 'plugin.oxog.dev';
 

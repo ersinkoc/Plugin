@@ -99,6 +99,8 @@ Creates a new micro-kernel instance.
 | `useAll(plugins[])` | Register multiple plugins |
 | `init()` | Initialize all plugins |
 | `destroy()` | Destroy all plugins |
+| `waitForPlugin(name)` | Wait for plugin initialization |
+| `waitForAll()` | Wait for all pending inits |
 | `getPlugin(name)` | Get a plugin by name |
 | `hasPlugin(name)` | Check if plugin exists |
 | `listPlugins()` | Get all plugins |
@@ -108,6 +110,8 @@ Creates a new micro-kernel instance.
 | `once(event, handler)` | Subscribe once |
 | `emit(event, payload)` | Emit event |
 | `off(event, handler)` | Unsubscribe |
+| `onWildcard(handler)` | Subscribe to all events |
+| `onPattern(pattern, handler)` | Subscribe to pattern |
 | `getContext()` | Get shared context |
 | `updateContext(partial)` | Update context |
 | `unregister(name)` | Remove plugin |
