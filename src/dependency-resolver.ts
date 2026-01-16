@@ -168,7 +168,8 @@ export class DependencyResolver {
       color.set(name, GRAY);
       path.push(name);
 
-      for (const dep of this.graph.get(name) || []) {
+      // Safe: dfs is only called with nodes that exist in graph
+      for (const dep of this.graph.get(name)!) {
         if (!this.graph.has(dep)) continue;
         if (color.get(dep) === GRAY) {
           // Found cycle - extract cycle path

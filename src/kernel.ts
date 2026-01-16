@@ -18,7 +18,8 @@ import type {
   KernelConfig,
   InternalPlugin,
   KernelState,
-  ErrorStrategy
+  ErrorStrategy,
+  InternalKernelEvents
 } from './types.js';
 import { PluginState } from './types.js';
 import { KernelState as KS } from './types.js';
@@ -63,6 +64,27 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
   private errorBoundary: ErrorBoundary;
   private lifecycle: LifecycleManager<TContext>;
   private config: KernelConfig<TContext, TEvents>;
+
+  /**
+   * Map of pending plugin initialization promises.
+   * Used to track and await late plugin initializations.
+   * @internal
+   */
+  private pendingInits = new Map<string, Promise<void>>();
+
+  /**
+   * Emit an internal kernel event.
+   * @internal
+   */
+  private emitInternal<K extends keyof InternalKernelEvents>(
+    event: K,
+    payload: InternalKernelEvents[K]
+  ): void {
+    (this.events as unknown as EventBus<InternalKernelEvents>).emit(
+      event,
+      payload
+    );
+  }
 
   /**
    * Extended kernel namespace for plugins.
@@ -157,21 +179,61 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
     plugin.install(this);
 
     // Emit kernel event
-    this.events.emit('plugin:install' as any, {
+    this.emitInternal('plugin:install', {
       name: plugin.name,
       version: plugin.version
-    } as any);
+    });
 
     // Auto-initialize if kernel is already ready
-    // Store the promise for pending initialization
+    // Track the promise so callers can await if needed
     if (this.state === KS.Ready) {
-      // Initialize the plugin asynchronously
-      // Note: This happens in background, callers should use await kernel.use()
-      // followed by a small delay if they need to ensure initialization completes
-      void this.initializePlugin(plugin.name);
+      const initPromise = this.initializePlugin(plugin.name);
+      this.pendingInits.set(plugin.name, initPromise);
+      // Clean up after completion
+      initPromise.finally(() => {
+        this.pendingInits.delete(plugin.name);
+      });
     }
 
     return this;
+  }
+
+  /**
+   * Wait for a specific plugin's initialization to complete.
+   *
+   * This is useful when adding plugins after kernel initialization.
+   *
+   * @param name - Plugin name to wait for
+   * @returns Promise that resolves when plugin is initialized
+   *
+   * @example
+   * ```typescript
+   * kernel.use(latePlugin);
+   * await kernel.waitForPlugin('late-plugin');
+   * // Now safe to use late-plugin
+   * ```
+   */
+  async waitForPlugin(name: string): Promise<void> {
+    const pending = this.pendingInits.get(name);
+    if (pending) {
+      await pending;
+    }
+  }
+
+  /**
+   * Wait for all pending plugin initializations to complete.
+   *
+   * @returns Promise that resolves when all pending plugins are initialized
+   *
+   * @example
+   * ```typescript
+   * kernel.use(plugin1).use(plugin2);
+   * await kernel.waitForAll();
+   * // All plugins are now initialized
+   * ```
+   */
+  async waitForAll(): Promise<void> {
+    await Promise.all(this.pendingInits.values());
   }
 
   /**
@@ -181,6 +243,8 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
    */
   private async initializePlugin(name: string): Promise<void> {
     const internal = this.plugins.get(name);
+    // Defensive check - plugin is always in map and Registered when called
+    /* c8 ignore next */
     if (!internal || internal.state !== PluginState.Registered) return;
 
     try {
@@ -195,9 +259,14 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
       internal.state = PluginState.Ready;
       internal.initializedAt = Date.now();
 
-      this.events.emit('plugin:init' as any, { name } as any);
+      this.emitInternal('plugin:init', { name });
     } catch (error) {
       internal.state = PluginState.Failed;
+      // ErrorBoundary already converts non-Errors to Errors
+      this.emitInternal('plugin:error', {
+        name,
+        error: error as Error
+      });
     }
   }
 
@@ -300,13 +369,10 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
     await this.unregisterAsync(plugin.name);
     this.use(plugin);
 
+    // Wait for pending initialization from use() if kernel is ready
+    // use() already triggers initializePlugin() when kernel is Ready
     if (this.state === KS.Ready) {
-      await this.lifecycle.initialize(
-        this.plugins,
-        [plugin.name],
-        this.context.get(),
-        this.errorBoundary
-      );
+      await this.waitForPlugin(plugin.name);
     }
   }
 
@@ -401,7 +467,7 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
 
       const order = this.resolver.resolve();
 
-      this.events.emit('kernel:init' as any, { timestamp: Date.now() } as any);
+      this.emitInternal('kernel:init', { timestamp: Date.now() });
 
       await this.lifecycle.initialize(
         this.plugins,
@@ -412,10 +478,10 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
 
       this.state = KS.Ready;
 
-      this.events.emit('kernel:ready' as any, {
+      this.emitInternal('kernel:ready', {
         timestamp: Date.now(),
         plugins: Array.from(this.plugins.keys())
-      } as any);
+      });
 
       if (this.config.onAfterInit) {
         await this.config.onAfterInit();
@@ -451,7 +517,7 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
       await this.config.onBeforeDestroy();
     }
 
-    this.events.emit('kernel:destroy' as any, { timestamp: Date.now() } as any);
+    this.emitInternal('kernel:destroy', { timestamp: Date.now() });
 
     const order = Array.from(this.plugins.keys());
     await this.lifecycle.destroy(
@@ -462,7 +528,7 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
 
     this.state = KS.Destroyed;
 
-    this.events.emit('kernel:destroyed' as any, { timestamp: Date.now() } as any);
+    this.emitInternal('kernel:destroyed', { timestamp: Date.now() });
 
     this.events.clear();
 

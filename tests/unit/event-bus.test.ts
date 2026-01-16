@@ -340,15 +340,29 @@ describe('EventBus', () => {
       ).not.toThrow();
     });
 
-    it('should handle same handler multiple times', () => {
+    it('should deduplicate same handler registration', () => {
       const bus = new EventBus<TestEvents>();
       const handler = vi.fn();
 
       bus.on('user:login', handler);
-      bus.on('user:login', handler);
+      bus.on('user:login', handler); // Same handler registered again
       bus.emit('user:login', { userId: '123', timestamp: 1000 });
 
-      expect(handler).toHaveBeenCalledTimes(2);
+      // Handler deduplication: same handler only called once
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it('should allow different handlers for same event', () => {
+      const bus = new EventBus<TestEvents>();
+      const handler1 = vi.fn();
+      const handler2 = vi.fn();
+
+      bus.on('user:login', handler1);
+      bus.on('user:login', handler2);
+      bus.emit('user:login', { userId: '123', timestamp: 1000 });
+
+      expect(handler1).toHaveBeenCalledTimes(1);
+      expect(handler2).toHaveBeenCalledTimes(1);
     });
   });
 });

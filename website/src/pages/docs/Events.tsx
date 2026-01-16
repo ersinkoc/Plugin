@@ -29,12 +29,12 @@ kernel.once('user:logout', (payload) => {
 });`;
 
 const wildcardCode = `// Subscribe to all events
-kernel.on('*', (event, payload) => {
+kernel.onWildcard((event, payload) => {
   console.log(\`[\${event}]\`, payload);
 });
 
 // Subscribe to pattern (events starting with 'user:')
-kernel.on('user:*', (event, payload) => {
+kernel.onPattern('user:*', (event, payload) => {
   console.log(\`User event: \${event}\`, payload);
 });`;
 
@@ -149,12 +149,32 @@ export function Events() {
             <tr className="border-b border-[hsl(var(--border))]">
               <td className="py-2 pr-4 font-mono text-[hsl(var(--foreground))]">kernel:ready</td>
               <td className="py-2 pr-4 font-mono">timestamp, plugins</td>
-              <td className="py-2">Kernel is ready</td>
+              <td className="py-2">Kernel initialization complete</td>
+            </tr>
+            <tr className="border-b border-[hsl(var(--border))]">
+              <td className="py-2 pr-4 font-mono text-[hsl(var(--foreground))]">kernel:destroy</td>
+              <td className="py-2 pr-4 font-mono">timestamp</td>
+              <td className="py-2">Kernel starts destroying</td>
+            </tr>
+            <tr className="border-b border-[hsl(var(--border))]">
+              <td className="py-2 pr-4 font-mono text-[hsl(var(--foreground))]">kernel:destroyed</td>
+              <td className="py-2 pr-4 font-mono">timestamp</td>
+              <td className="py-2">Kernel destruction complete</td>
             </tr>
             <tr className="border-b border-[hsl(var(--border))]">
               <td className="py-2 pr-4 font-mono text-[hsl(var(--foreground))]">plugin:install</td>
               <td className="py-2 pr-4 font-mono">name, version</td>
               <td className="py-2">Plugin is registered</td>
+            </tr>
+            <tr className="border-b border-[hsl(var(--border))]">
+              <td className="py-2 pr-4 font-mono text-[hsl(var(--foreground))]">plugin:init</td>
+              <td className="py-2 pr-4 font-mono">name</td>
+              <td className="py-2">Plugin initialization complete</td>
+            </tr>
+            <tr className="border-b border-[hsl(var(--border))]">
+              <td className="py-2 pr-4 font-mono text-[hsl(var(--foreground))]">plugin:destroy</td>
+              <td className="py-2 pr-4 font-mono">name</td>
+              <td className="py-2">Plugin is destroyed</td>
             </tr>
             <tr className="border-b border-[hsl(var(--border))]">
               <td className="py-2 pr-4 font-mono text-[hsl(var(--foreground))]">plugin:error</td>
@@ -164,6 +184,20 @@ export function Events() {
           </tbody>
         </table>
       </div>
+
+      <h2 className="text-2xl font-semibold mt-12 mb-4">Handler Deduplication</h2>
+      <p className="text-[hsl(var(--muted-foreground))] mb-4">
+        The event bus automatically prevents duplicate handler registration.
+        If you register the same handler function multiple times, it will only be called once per event:
+      </p>
+      <CodeBlock code={`const handler = (payload) => console.log(payload);
+
+// Register same handler twice
+kernel.on('event', handler);
+kernel.on('event', handler);
+
+// Handler will only be called once
+kernel.emit('event', { data: 'test' });`} language="typescript" />
     </article>
   );
 }

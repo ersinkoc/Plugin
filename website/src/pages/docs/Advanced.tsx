@@ -3,14 +3,21 @@ import { CodeBlock } from '@/components/code/CodeBlock';
 const dynamicPluginsCode = `const kernel = createKernel();
 await kernel.init();
 
-// Add plugin after init (auto-initializes)
-await kernel.use(newPlugin);
+// Add plugin after init (auto-initializes in background)
+kernel.use(newPlugin);
+
+// Wait for specific plugin to finish initializing
+await kernel.waitForPlugin('new-plugin');
+
+// Or wait for all pending initializations
+kernel.use(plugin1).use(plugin2);
+await kernel.waitForAll();
 
 // Unregister plugin (calls onDestroy)
 const removed = await kernel.unregister('old-plugin');
 console.log('Plugin removed:', removed);
 
-// Replace plugin (unregister + register)
+// Replace plugin (unregister + register + init)
 await kernel.replace(updatedPlugin);
 
 // Reload plugin (destroy + init)

@@ -71,14 +71,21 @@ export class EventBus<TEvents extends EventMap> {
     if (!this.handlers.has(eventKey)) {
       this.handlers.set(eventKey, []);
     }
-    this.handlers.get(eventKey)!.push(handler as EventHandler<unknown>);
+
+    const handlers = this.handlers.get(eventKey)!;
+    const typedHandler = handler as EventHandler<unknown>;
+
+    // Prevent duplicate handler registration
+    if (!handlers.includes(typedHandler)) {
+      handlers.push(typedHandler);
+    }
 
     return () => {
-      const handlers = this.handlers.get(eventKey);
-      if (handlers) {
-        const index = handlers.indexOf(handler as EventHandler<unknown>);
+      const currentHandlers = this.handlers.get(eventKey);
+      if (currentHandlers) {
+        const index = currentHandlers.indexOf(typedHandler);
         if (index !== -1) {
-          handlers.splice(index, 1);
+          currentHandlers.splice(index, 1);
         }
       }
     };
@@ -200,7 +207,10 @@ export class EventBus<TEvents extends EventMap> {
    * ```
    */
   onWildcard(handler: WildcardHandler): Unsubscribe {
-    this.wildcardHandlers.push(handler);
+    // Prevent duplicate handler registration
+    if (!this.wildcardHandlers.includes(handler)) {
+      this.wildcardHandlers.push(handler);
+    }
     return () => {
       const index = this.wildcardHandlers.indexOf(handler);
       if (index !== -1) {
@@ -231,13 +241,20 @@ export class EventBus<TEvents extends EventMap> {
     if (!this.patternHandlers.has(pattern)) {
       this.patternHandlers.set(pattern, []);
     }
-    this.patternHandlers.get(pattern)!.push(handler);
+
+    const handlers = this.patternHandlers.get(pattern)!;
+
+    // Prevent duplicate handler registration
+    if (!handlers.includes(handler)) {
+      handlers.push(handler);
+    }
+
     return () => {
-      const handlers = this.patternHandlers.get(pattern);
-      if (handlers) {
-        const index = handlers.indexOf(handler);
+      const currentHandlers = this.patternHandlers.get(pattern);
+      if (currentHandlers) {
+        const index = currentHandlers.indexOf(handler);
         if (index !== -1) {
-          handlers.splice(index, 1);
+          currentHandlers.splice(index, 1);
         }
       }
     };

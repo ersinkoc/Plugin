@@ -901,4 +901,233 @@ describe('KernelInstance', () => {
       expect(inited).toBe(false);
     });
   });
+
+  describe('waitForPlugin', () => {
+    it('should wait for specific plugin initialization', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      let inited = false;
+
+      const earlyPlugin = {
+        name: 'early',
+        version: '1.0.0',
+        install() {}
+      };
+
+      const latePlugin = {
+        name: 'late',
+        version: '1.0.0',
+        install() {},
+        async onInit() {
+          await new Promise((r) => setTimeout(r, 10));
+          inited = true;
+        }
+      };
+
+      kernel.use(earlyPlugin);
+      await kernel.init();
+
+      // Add plugin after init (triggers background initialization)
+      kernel.use(latePlugin);
+      expect(inited).toBe(false);
+
+      // Wait for plugin to complete
+      await kernel.waitForPlugin('late');
+      expect(inited).toBe(true);
+    });
+
+    it('should resolve immediately if no pending init', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      const plugin = {
+        name: 'test',
+        version: '1.0.0',
+        install() {}
+      };
+
+      kernel.use(plugin);
+      await kernel.init();
+
+      // No pending init for this plugin
+      await kernel.waitForPlugin('test');
+      expect(kernel.hasPlugin('test')).toBe(true);
+    });
+
+    it('should resolve for non-existent plugin', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      await kernel.waitForPlugin('non-existent');
+      // Should not throw
+    });
+  });
+
+  describe('waitForAll', () => {
+    it('should wait for all pending plugin initializations', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      const initOrder: string[] = [];
+
+      const earlyPlugin = {
+        name: 'early',
+        version: '1.0.0',
+        install() {}
+      };
+
+      const latePlugin1 = {
+        name: 'late1',
+        version: '1.0.0',
+        install() {},
+        async onInit() {
+          await new Promise((r) => setTimeout(r, 5));
+          initOrder.push('late1');
+        }
+      };
+
+      const latePlugin2 = {
+        name: 'late2',
+        version: '1.0.0',
+        install() {},
+        async onInit() {
+          await new Promise((r) => setTimeout(r, 10));
+          initOrder.push('late2');
+        }
+      };
+
+      kernel.use(earlyPlugin);
+      await kernel.init();
+
+      // Add plugins after init
+      kernel.use(latePlugin1);
+      kernel.use(latePlugin2);
+
+      expect(initOrder).toHaveLength(0);
+
+      await kernel.waitForAll();
+
+      expect(initOrder).toContain('late1');
+      expect(initOrder).toContain('late2');
+    });
+
+    it('should resolve immediately if no pending inits', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      await kernel.waitForAll();
+      // Should not throw
+    });
+  });
+
+  describe('plugin error events', () => {
+    it('should emit plugin:error event on initialization failure', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      const errors: { name: string; error: Error }[] = [];
+
+      kernel.onWildcard((event, payload) => {
+        if (event === 'plugin:error') {
+          errors.push(payload as { name: string; error: Error });
+        }
+      });
+
+      const plugin = {
+        name: 'test',
+        version: '1.0.0',
+        install() {},
+        async onInit() {
+          await new Promise((r) => setTimeout(r, 1));
+        }
+      };
+
+      const failingPlugin = {
+        name: 'failing',
+        version: '1.0.0',
+        install() {},
+        async onInit() {
+          throw new Error('Init failed');
+        }
+      };
+
+      kernel.use(plugin);
+      await kernel.init();
+
+      // Add failing plugin after init
+      kernel.use(failingPlugin);
+      await kernel.waitForPlugin('failing');
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.name).toBe('failing');
+      expect(errors[0]?.error.message).toBe('Init failed');
+    });
+
+    it('should handle non-Error thrown during initialization', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      const errors: { name: string; error: Error }[] = [];
+
+      kernel.onWildcard((event, payload) => {
+        if (event === 'plugin:error') {
+          errors.push(payload as { name: string; error: Error });
+        }
+      });
+
+      const plugin = {
+        name: 'test',
+        version: '1.0.0',
+        install() {}
+      };
+
+      const stringThrowingPlugin = {
+        name: 'string-thrower',
+        version: '1.0.0',
+        install() {},
+        async onInit() {
+          // eslint-disable-next-line no-throw-literal
+          throw 'String error message';
+        }
+      };
+
+      kernel.use(plugin);
+      await kernel.init();
+
+      // Add plugin that throws non-Error after init
+      kernel.use(stringThrowingPlugin);
+      await kernel.waitForPlugin('string-thrower');
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.name).toBe('string-thrower');
+      expect(errors[0]?.error).toBeInstanceOf(Error);
+      expect(errors[0]?.error.message).toBe('String error message');
+    });
+
+    it('should handle destroy during late plugin initialization', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      let initStarted = false;
+      let initCompleted = false;
+
+      const plugin = {
+        name: 'test',
+        version: '1.0.0',
+        install() {}
+      };
+
+      const slowPlugin = {
+        name: 'slow',
+        version: '1.0.0',
+        install() {},
+        async onInit() {
+          initStarted = true;
+          await new Promise((r) => setTimeout(r, 50));
+          initCompleted = true;
+        }
+      };
+
+      kernel.use(plugin);
+      await kernel.init();
+
+      // Add slow plugin after init
+      kernel.use(slowPlugin);
+
+      // Wait a bit for init to start, then destroy
+      await new Promise((r) => setTimeout(r, 10));
+      expect(initStarted).toBe(true);
+
+      // Destroy kernel while slow plugin is initializing
+      await kernel.destroy();
+
+      // Init should not have completed
+      expect(kernel.isDestroyed()).toBe(true);
+    });
+  });
 });

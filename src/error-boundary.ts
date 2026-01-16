@@ -147,63 +147,6 @@ export class ErrorBoundary {
   }
 
   /**
-   * Execute with 'isolate' strategy.
-   *
-   * Errors are caught and null is returned.
-   *
-   * @param fn - Function to execute
-   * @returns Result or null if error occurred
-   *
-   * @internal
-   * @deprecated Use withBoundary instead
-   */
-  async wrapIsolate<T>(fn: () => Promise<T>): Promise<T | null> {
-    try {
-      return await fn();
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Execute with 'fail-fast' strategy.
-   *
-   * Errors are re-thrown immediately.
-   *
-   * @param fn - Function to execute
-   * @returns Result of the function
-   * @throws Error if function throws
-   *
-   * @internal
-   * @deprecated Use withBoundary instead
-   */
-  async wrapFailFast<T>(fn: () => Promise<T>): Promise<T> {
-    return await fn();
-  }
-
-  /**
-   * Execute with 'collect' strategy.
-   *
-   * Errors are collected and null is returned.
-   *
-   * @param fn - Function to execute
-   * @returns Result or null if error occurred
-   *
-   * @internal
-   * @deprecated Use withBoundary instead
-   */
-  async wrapCollect<T>(fn: () => Promise<T>): Promise<T | null> {
-    try {
-      return await fn();
-    } catch (error) {
-      if (error instanceof Error) {
-        this.errors.push(error);
-      }
-      return null;
-    }
-  }
-
-  /**
    * Throw AggregateError if in 'collect' strategy and errors exist.
    *
    * @throws {AggregateError} If errors were collected

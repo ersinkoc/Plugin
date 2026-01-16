@@ -199,66 +199,6 @@ describe('ErrorBoundary', () => {
     });
   });
 
-  describe('wrapIsolate', () => {
-    it('should return result on success', async () => {
-      const boundary = new ErrorBoundary('isolate');
-      const result = await boundary.wrapIsolate(async () => 42);
-      expect(result).toBe(42);
-    });
-
-    it('should return null on error', async () => {
-      const boundary = new ErrorBoundary('isolate');
-      const result = await boundary.wrapIsolate(async () => {
-        throw new Error('Error');
-      });
-      expect(result).toBeNull();
-    });
-  });
-
-  describe('wrapFailFast', () => {
-    it('should return result on success', async () => {
-      const boundary = new ErrorBoundary('fail-fast');
-      const result = await boundary.wrapFailFast(async () => 42);
-      expect(result).toBe(42);
-    });
-
-    it('should throw on error', async () => {
-      const boundary = new ErrorBoundary('fail-fast');
-      await expect(
-        boundary.wrapFailFast(async () => {
-          throw new Error('Error');
-        })
-      ).rejects.toThrow('Error');
-    });
-  });
-
-  describe('wrapCollect', () => {
-    it('should return result on success', async () => {
-      const boundary = new ErrorBoundary('collect');
-      const result = await boundary.wrapCollect(async () => 42);
-      expect(result).toBe(42);
-    });
-
-    it('should return null on error', async () => {
-      const boundary = new ErrorBoundary('collect');
-      const result = await boundary.wrapCollect(async () => {
-        throw new Error('Error');
-      });
-      expect(result).toBeNull();
-    });
-
-    it('should collect error', async () => {
-      const boundary = new ErrorBoundary('collect');
-      const error = new Error('Test');
-
-      await boundary.wrapCollect(async () => {
-        throw error;
-      });
-
-      expect(boundary.getErrors()).toContain(error);
-    });
-  });
-
   describe('clearErrors', () => {
     it('should clear collected errors', async () => {
       const plugin = createMockPlugin({});

@@ -163,3 +163,21 @@ export type PatternHandler = WildcardHandler;
 export type PluginFactory<TContext, TOptions = unknown> = (
   options: TOptions
 ) => Plugin<TContext>;
+
+/**
+ * Internal kernel events emitted during lifecycle.
+ *
+ * These events are always available regardless of user-defined events.
+ *
+ * @internal
+ */
+export interface InternalKernelEvents extends EventMap {
+  'plugin:install': { name: string; version: string };
+  'plugin:init': { name: string };
+  'plugin:destroy': { name: string };
+  'plugin:error': { name: string; error: Error };
+  'kernel:init': { timestamp: number };
+  'kernel:ready': { timestamp: number; plugins: string[] };
+  'kernel:destroy': { timestamp: number };
+  'kernel:destroyed': { timestamp: number };
+}

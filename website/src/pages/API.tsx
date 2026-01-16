@@ -26,26 +26,30 @@ const kernelInterfaceCode = `interface KernelInstance<TContext, TEvents> {
   unregister(name: string): Promise<boolean>;
   replace(plugin: Plugin<TContext>): Promise<void>;
   reload(name: string): Promise<void>;
-  
+  waitForPlugin(name: string): Promise<void>;
+  waitForAll(): Promise<void>;
+
   // Lifecycle
   init(): Promise<void>;
   destroy(): Promise<void>;
   isInitialized(): boolean;
   isDestroyed(): boolean;
-  
+
   // Plugin Queries
   getPlugin<T>(name: string): T | undefined;
   hasPlugin(name: string): boolean;
   listPlugins(): ReadonlyArray<Plugin<TContext>>;
   getPluginNames(): string[];
   getDependencyGraph(): Record<string, string[]>;
-  
+
   // Events
   on<K extends keyof TEvents>(event: K, handler: (payload: TEvents[K]) => void): Unsubscribe;
   once<K extends keyof TEvents>(event: K, handler: (payload: TEvents[K]) => void): Unsubscribe;
   off<K extends keyof TEvents>(event: K, handler: (payload: TEvents[K]) => void): void;
   emit<K extends keyof TEvents>(event: K, payload: TEvents[K]): void;
-  
+  onWildcard(handler: (event: string, payload: unknown) => void): Unsubscribe;
+  onPattern(pattern: string, handler: (event: string, payload: unknown) => void): Unsubscribe;
+
   // Context
   getContext(): TContext;
   updateContext(partial: Partial<TContext>): void;
