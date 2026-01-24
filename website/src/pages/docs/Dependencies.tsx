@@ -72,6 +72,58 @@ const myPlugin: Plugin = {
 kernel.use(myPlugin);
 await kernel.init(); // Throws: Missing dependency: 'non-existent' required by 'my-plugin'`;
 
+const dynamicDepsCode = `// Dependencies are also validated for dynamic plugins
+await kernel.init();
+
+// This throws immediately - 'missing' is not registered
+kernel.use({
+  name: 'late-plugin',
+  dependencies: ['missing'],
+  install() {}
+}); // Throws: Missing dependency: 'missing' required by 'late-plugin'
+
+// This works - 'database' is already initialized
+kernel.use({
+  name: 'late-api',
+  dependencies: ['database'],
+  install() {},
+  async onInit() {
+    // Safe to use database here
+  }
+});
+
+// Wait for the new plugin to initialize
+await kernel.waitForPlugin('late-api');`;
+
+const dependencyOrderCode = `// Dynamic plugins wait for their dependencies
+await kernel.init();
+
+// Add dependency first (slow init)
+kernel.use({
+  name: 'slow-dep',
+  install() {},
+  async onInit() {
+    await new Promise(r => setTimeout(r, 1000));
+    console.log('slow-dep ready');
+  }
+});
+
+// Add dependent immediately after
+kernel.use({
+  name: 'dependent',
+  dependencies: ['slow-dep'],
+  install() {},
+  async onInit() {
+    // This runs AFTER slow-dep completes
+    console.log('dependent ready');
+  }
+});
+
+await kernel.waitForAll();
+// Output:
+// slow-dep ready
+// dependent ready`;
+
 export function Dependencies() {
   return (
     <article className="prose prose-invert max-w-none">
@@ -108,12 +160,26 @@ export function Dependencies() {
       </p>
       <CodeBlock code={missingErrorCode} language="typescript" />
 
+      <h2 className="text-2xl font-semibold mt-12 mb-4">Dynamic Plugin Dependencies</h2>
+      <p className="text-[hsl(var(--muted-foreground))] mb-4">
+        Dependencies are validated even when adding plugins after <code className="text-[hsl(var(--primary))]">init()</code>.
+        Missing dependencies throw immediately, and dependent plugins automatically wait for their dependencies:
+      </p>
+      <CodeBlock code={dynamicDepsCode} language="typescript" />
+
+      <h3 className="text-xl font-semibold mt-8 mb-4">Dependency Initialization Order</h3>
+      <p className="text-[hsl(var(--muted-foreground))] mb-4">
+        When adding multiple plugins dynamically, dependent plugins wait for their dependencies to complete:
+      </p>
+      <CodeBlock code={dependencyOrderCode} language="typescript" />
+
       <h2 className="text-2xl font-semibold mt-12 mb-4">Best Practices</h2>
       <ul className="list-disc list-inside text-[hsl(var(--muted-foreground))] space-y-2">
         <li>Keep dependency chains shallow</li>
         <li>Avoid circular dependencies by design</li>
         <li>Use events for loose coupling instead of direct dependencies</li>
         <li>Document plugin dependencies clearly</li>
+        <li>Always use <code className="text-[hsl(var(--primary))]">waitForPlugin()</code> or <code className="text-[hsl(var(--primary))]">waitForAll()</code> after adding dynamic plugins</li>
       </ul>
     </article>
   );

@@ -130,6 +130,54 @@ describe('EventBus', () => {
 
       expect(handler).not.toHaveBeenCalled();
     });
+
+    it('should allow off() with original handler reference', () => {
+      const bus = new EventBus<TestEvents>();
+      const handler = vi.fn();
+
+      bus.once('user:login', handler);
+      bus.off('user:login', handler); // Should work with original handler
+      bus.emit('user:login', { userId: '123', timestamp: 1000 });
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('should clean up wrapper mapping after event fires', () => {
+      const bus = new EventBus<TestEvents>();
+      const handler = vi.fn();
+
+      bus.once('user:login', handler);
+      bus.emit('user:login', { userId: '123', timestamp: 1000 });
+
+      // Handler should have been called
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Second emit should not call handler
+      bus.emit('user:login', { userId: '456', timestamp: 2000 });
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Calling off after event fired should not throw
+      expect(() => bus.off('user:login', handler)).not.toThrow();
+    });
+
+    it('should handle multiple once subscriptions with same handler', () => {
+      const bus = new EventBus<TestEvents>();
+      const handler = vi.fn();
+
+      bus.once('user:login', handler);
+      bus.once('user:logout', handler);
+
+      bus.emit('user:login', { userId: '123', timestamp: 1000 });
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      bus.emit('user:logout', { userId: '123' });
+      expect(handler).toHaveBeenCalledTimes(2);
+
+      // Both should be cleaned up
+      bus.emit('user:login', { userId: '456', timestamp: 2000 });
+      bus.emit('user:logout', { userId: '456' });
+      expect(handler).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('wildcard handlers', () => {

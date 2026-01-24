@@ -91,4 +91,162 @@ describe('ContextManager', () => {
       expect(manager.get().config).toEqual({ a: 10 });
     });
   });
+
+  describe('deepUpdate', () => {
+    it('should deep merge nested objects', () => {
+      type Context = { config: { db: string; api: string } };
+      const manager = new ContextManager<Context>({
+        config: { db: 'localhost', api: 'http://localhost' }
+      });
+
+      // Deep merge - only updates db, keeps api
+      manager.deepUpdate({ config: { db: 'postgres://prod' } } as any);
+
+      expect(manager.get()).toEqual({
+        config: { db: 'postgres://prod', api: 'http://localhost' }
+      });
+    });
+
+    it('should handle deeply nested objects', () => {
+      type Context = {
+        level1: {
+          level2: {
+            level3: { a: number; b: number };
+            other: string;
+          };
+          sibling: string;
+        };
+      };
+      const manager = new ContextManager<Context>({
+        level1: {
+          level2: {
+            level3: { a: 1, b: 2 },
+            other: 'value'
+          },
+          sibling: 'keep'
+        }
+      });
+
+      manager.deepUpdate({
+        level1: { level2: { level3: { a: 10 } } }
+      } as any);
+
+      expect(manager.get()).toEqual({
+        level1: {
+          level2: {
+            level3: { a: 10, b: 2 },
+            other: 'value'
+          },
+          sibling: 'keep'
+        }
+      });
+    });
+
+    it('should replace arrays instead of merging', () => {
+      type Context = { items: number[]; config: { tags: string[] } };
+      const manager = new ContextManager<Context>({
+        items: [1, 2, 3],
+        config: { tags: ['a', 'b', 'c'] }
+      });
+
+      manager.deepUpdate({
+        items: [4, 5],
+        config: { tags: ['x'] }
+      } as any);
+
+      expect(manager.get()).toEqual({
+        items: [4, 5],
+        config: { tags: ['x'] }
+      });
+    });
+
+    it('should handle null values correctly', () => {
+      type Context = { a: string | null; config: { b: number | null } };
+      const manager = new ContextManager<Context>({
+        a: 'value',
+        config: { b: 42 }
+      });
+
+      manager.deepUpdate({ a: null, config: { b: null } } as any);
+
+      expect(manager.get()).toEqual({
+        a: null,
+        config: { b: null }
+      });
+    });
+
+    it('should handle primitive values', () => {
+      type Context = { count: number; name: string; active: boolean };
+      const manager = new ContextManager<Context>({
+        count: 0,
+        name: 'old',
+        active: false
+      });
+
+      manager.deepUpdate({ count: 10, active: true });
+
+      expect(manager.get()).toEqual({
+        count: 10,
+        name: 'old',
+        active: true
+      });
+    });
+
+    it('should add new nested properties', () => {
+      type Context = { config?: { a?: number; b?: number } };
+      const manager = new ContextManager<Context>({});
+
+      manager.deepUpdate({ config: { a: 1 } } as any);
+
+      expect(manager.get()).toEqual({ config: { a: 1 } });
+
+      manager.deepUpdate({ config: { b: 2 } } as any);
+
+      expect(manager.get()).toEqual({ config: { a: 1, b: 2 } });
+    });
+
+    it('should handle target being non-object', () => {
+      type Context = { value: string | { nested: number } };
+      const manager = new ContextManager<Context>({
+        value: 'string'
+      });
+
+      manager.deepUpdate({ value: { nested: 42 } });
+
+      expect(manager.get()).toEqual({ value: { nested: 42 } });
+    });
+
+    it('should handle source being non-object', () => {
+      type Context = { value: string | { nested: number } };
+      const manager = new ContextManager<Context>({
+        value: { nested: 42 }
+      });
+
+      manager.deepUpdate({ value: 'string' });
+
+      expect(manager.get()).toEqual({ value: 'string' });
+    });
+
+    it('should handle empty partial', () => {
+      type Context = { config: { a: number } };
+      const manager = new ContextManager<Context>({
+        config: { a: 1 }
+      });
+
+      manager.deepUpdate({});
+
+      expect(manager.get()).toEqual({ config: { a: 1 } });
+    });
+
+    it('should handle target array being replaced with object', () => {
+      type Context = { value: number[] | { nested: number } };
+      const manager = new ContextManager<Context>({
+        value: [1, 2, 3]
+      });
+
+      manager.deepUpdate({ value: { nested: 42 } });
+
+      expect(manager.get()).toEqual({ value: { nested: 42 } });
+    });
+  });
 });

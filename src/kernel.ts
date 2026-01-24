@@ -55,11 +55,29 @@ import { LifecycleManager } from './lifecycle-manager.js';
  * await kernel.destroy();
  * ```
  */
+/**
+ * Combined event type that includes both user events and internal kernel events.
+ *
+ * Internal events take precedence - if a user defines an event with the same
+ * name as an internal event, the internal event type is used. This prevents
+ * type conflicts and ensures type safety when emitting internal events.
+ *
+ * If you need custom payload types for internal events, subscribe with
+ * `onWildcard()` or `onPattern()` instead.
+ *
+ * @internal
+ */
+type CombinedEvents<TEvents extends EventMap> = Omit<
+  TEvents,
+  keyof InternalKernelEvents
+> &
+  InternalKernelEvents;
+
 export class KernelInstance<TContext, TEvents extends EventMap> {
   private state: KernelState = KS.Created;
   private plugins = new Map<string, InternalPlugin<TContext>>();
   private context: ContextManager<TContext>;
-  private events: EventBus<TEvents>;
+  private events: EventBus<CombinedEvents<TEvents>>;
   private resolver: DependencyResolver;
   private errorBoundary: ErrorBoundary;
   private lifecycle: LifecycleManager<TContext>;
@@ -74,15 +92,23 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
 
   /**
    * Emit an internal kernel event.
+   *
+   * Internal events are always valid since CombinedEvents includes
+   * InternalKernelEvents with correct types. The cast is safe because
+   * Omit<TEvents, keyof InternalKernelEvents> & InternalKernelEvents
+   * guarantees internal event keys have InternalKernelEvents types.
+   *
    * @internal
    */
   private emitInternal<K extends keyof InternalKernelEvents>(
     event: K,
     payload: InternalKernelEvents[K]
   ): void {
-    (this.events as unknown as EventBus<InternalKernelEvents>).emit(
-      event,
-      payload
+    // Safe cast: CombinedEvents always includes InternalKernelEvents
+    // with correct types (user events with same names are excluded via Omit)
+    this.events.emit(
+      event as keyof CombinedEvents<TEvents>,
+      payload as CombinedEvents<TEvents>[keyof CombinedEvents<TEvents>]
     );
   }
 
@@ -123,7 +149,7 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
     this.context = new ContextManager(
       (this.config.context as TContext) ?? ({} as TContext)
     );
-    this.events = new EventBus<TEvents>();
+    this.events = new EventBus<CombinedEvents<TEvents>>();
     this.resolver = new DependencyResolver();
     this.errorBoundary = new ErrorBoundary(
       this.config.errorStrategy || 'isolate',
@@ -160,6 +186,14 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
       throw new OPluginError('Cannot add plugins to destroyed kernel', 'kernel');
     }
 
+    if (this.state === KS.Initializing) {
+      throw new OPluginError(
+        'Cannot add plugins while kernel is initializing. ' +
+          'Register all plugins before calling init(), or wait until kernel is ready.',
+        'kernel'
+      );
+    }
+
     if (this.plugins.has(plugin.name)) {
       throw new OPluginError(
         `Plugin '${plugin.name}' is already registered`,
@@ -187,7 +221,11 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
     // Auto-initialize if kernel is already ready
     // Track the promise so callers can await if needed
     if (this.state === KS.Ready) {
-      const initPromise = this.initializePlugin(plugin.name);
+      // Validate dependencies before initialization
+      this.resolver.validateSinglePlugin(plugin.name);
+
+      // Ensure all dependencies are ready before initializing
+      const initPromise = this.initializeWithDependencies(plugin.name);
       this.pendingInits.set(plugin.name, initPromise);
       // Clean up after completion
       initPromise.finally(() => {
@@ -234,6 +272,50 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
    */
   async waitForAll(): Promise<void> {
     await Promise.all(this.pendingInits.values());
+  }
+
+  /**
+   * Initialize a plugin after ensuring all its dependencies are ready.
+   *
+   * Waits for pending dependency initializations and validates that
+   * all dependencies are in Ready state before proceeding.
+   *
+   * @internal
+   */
+  private async initializeWithDependencies(name: string): Promise<void> {
+    const internal = this.plugins.get(name);
+    // Defensive: plugin always exists when this method is called from use()
+    /* c8 ignore next */
+    if (!internal) return;
+
+    const deps = internal.plugin.dependencies || [];
+
+    // Wait for any pending dependency initializations
+    for (const dep of deps) {
+      const pending = this.pendingInits.get(dep);
+      if (pending) {
+        await pending;
+      }
+    }
+
+    // Verify all dependencies are in Ready state
+    for (const dep of deps) {
+      const depInternal = this.plugins.get(dep);
+      if (!depInternal || depInternal.state !== PluginState.Ready) {
+        internal.state = PluginState.Failed;
+        const error = new OPluginError(
+          `Dependency '${dep}' is not ready for plugin '${name}'`,
+          name
+        );
+        this.emitInternal('plugin:error', { name, error });
+        // Don't throw - just mark as failed and return
+        // This prevents unhandled promise rejections during dynamic plugin loading
+        return;
+      }
+    }
+
+    // Now initialize the plugin
+    await this.initializePlugin(name);
   }
 
   /**
@@ -296,6 +378,10 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
    * version from the Kernel interface - for proper async cleanup, use
    * `unregisterAsync()` instead.
    *
+   * WARNING: If the plugin is currently initializing, the sync version
+   * cannot properly wait for initialization to complete. Use `unregisterAsync()`
+   * for proper cleanup of initializing plugins.
+   *
    * @param name - Name of the plugin to unregister
    * @returns true if removed, false if not found
    *
@@ -308,8 +394,22 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
     const internal = this.plugins.get(name);
     if (!internal) return false;
 
-    // Call onDestroy if initialized (fire-and-forget for async)
-    if (internal.state === PluginState.Ready && internal.plugin.onDestroy) {
+    // Handle initializing plugins - wait for init then destroy (fire-and-forget)
+    const pendingInit = this.pendingInits.get(name);
+    if (internal.state === PluginState.Initializing && pendingInit) {
+      // Fire and forget: wait for init, then call onDestroy
+      void pendingInit
+        .finally(() => {
+          if (internal.plugin.onDestroy) {
+            return internal.plugin.onDestroy();
+          }
+        })
+        .catch(() => {
+          // Ignore errors during cleanup
+        });
+      this.pendingInits.delete(name);
+    } else if (internal.state === PluginState.Ready && internal.plugin.onDestroy) {
+      // Call onDestroy if initialized (fire-and-forget for async)
       // Don't await - fire and forget for sync version
       void Promise.resolve().then(() => internal.plugin.onDestroy!());
     }
@@ -324,6 +424,8 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
    * Unregister a plugin from the kernel (async version).
    *
    * This is the async version that properly awaits onDestroy.
+   * If the plugin is currently initializing, it waits for initialization
+   * to complete before calling onDestroy to prevent resource leaks.
    *
    * @param name - Name of the plugin to unregister
    * @returns Promise resolving to true if removed, false if not found
@@ -337,8 +439,27 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
     const internal = this.plugins.get(name);
     if (!internal) return false;
 
-    // Call onDestroy if initialized
-    if (internal.state === PluginState.Ready && internal.plugin.onDestroy) {
+    // Wait for pending initialization to complete
+    const pendingInit = this.pendingInits.get(name);
+    if (internal.state === PluginState.Initializing && pendingInit) {
+      try {
+        await pendingInit;
+        /* c8 ignore start */
+      } catch {
+        // Defensive: initializePlugin catches errors internally, so pendingInit
+        // won't reject. This catch exists for safety if implementation changes.
+      }
+      /* c8 ignore stop */
+      this.pendingInits.delete(name);
+    }
+
+    // Call onDestroy if plugin was initialized (Ready) or just finished initializing
+    // After waiting for pendingInit, the state could be Ready or Failed
+    if (
+      (internal.state === PluginState.Ready ||
+        internal.state === PluginState.Failed) &&
+      internal.plugin.onDestroy
+    ) {
       try {
         await internal.plugin.onDestroy();
       } catch {
@@ -674,9 +795,9 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
    * // Call unsub() to unsubscribe
    * ```
    */
-  on<K extends keyof TEvents>(
+  on<K extends keyof CombinedEvents<TEvents>>(
     event: K,
-    handler: (payload: TEvents[K]) => void
+    handler: (payload: CombinedEvents<TEvents>[K]) => void
   ): Unsubscribe {
     return this.events.on(event, handler);
   }
@@ -695,9 +816,9 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
    * });
    * ```
    */
-  once<K extends keyof TEvents>(
+  once<K extends keyof CombinedEvents<TEvents>>(
     event: K,
-    handler: (payload: TEvents[K]) => void
+    handler: (payload: CombinedEvents<TEvents>[K]) => void
   ): Unsubscribe {
     return this.events.once(event, handler);
   }
@@ -715,9 +836,9 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
    * kernel.off('event', handler);
    * ```
    */
-  off<K extends keyof TEvents>(
+  off<K extends keyof CombinedEvents<TEvents>>(
     event: K,
-    handler: (payload: TEvents[K]) => void
+    handler: (payload: CombinedEvents<TEvents>[K]) => void
   ): void {
     this.events.off(event, handler);
   }
@@ -733,7 +854,10 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
    * kernel.emit('user:login', { userId: '123', timestamp: Date.now() });
    * ```
    */
-  emit<K extends keyof TEvents>(event: K, payload: TEvents[K]): void {
+  emit<K extends keyof CombinedEvents<TEvents>>(
+    event: K,
+    payload: CombinedEvents<TEvents>[K]
+  ): void {
     this.events.emit(event, payload);
   }
 
@@ -795,7 +919,10 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
   }
 
   /**
-   * Update the context with a partial merge.
+   * Update the context with a partial merge (shallow).
+   *
+   * Only top-level properties are merged. For deep merging of
+   * nested objects, use `deepUpdateContext()`.
    *
    * @param partial - Partial context to merge
    *
@@ -806,6 +933,33 @@ export class KernelInstance<TContext, TEvents extends EventMap> {
    */
   updateContext(partial: Partial<TContext>): void {
     this.context.update(partial);
+  }
+
+  /**
+   * Update the context with a deep merge.
+   *
+   * Nested objects are recursively merged instead of being replaced.
+   * Arrays are replaced, not merged.
+   *
+   * Use this when you have nested configuration and want to update
+   * only specific nested properties without losing other nested values.
+   *
+   * @param partial - Partial context to deep merge
+   *
+   * @example
+   * ```typescript
+   * interface Context { config: { db: string; api: string } };
+   * const kernel = createKernel<Context>({
+   *   context: { config: { db: 'localhost', api: 'http://localhost' } }
+   * });
+   *
+   * // Deep merge - only updates db, keeps api
+   * kernel.deepUpdateContext({ config: { db: 'postgres://prod' } });
+   * kernel.getContext(); // { config: { db: 'postgres://prod', api: 'http://localhost' } }
+   * ```
+   */
+  deepUpdateContext(partial: Partial<TContext>): void {
+    this.context.deepUpdate(partial);
   }
 }
 

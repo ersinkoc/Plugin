@@ -14,7 +14,7 @@ kernel.use(plugin1).use(plugin2);
 await kernel.waitForAll();
 
 // Unregister plugin (calls onDestroy)
-const removed = await kernel.unregister('old-plugin');
+const removed = await kernel.unregisterAsync('old-plugin');
 console.log('Plugin removed:', removed);
 
 // Replace plugin (unregister + register + init)
@@ -22,6 +22,30 @@ await kernel.replace(updatedPlugin);
 
 // Reload plugin (destroy + init)
 await kernel.reload('my-plugin');`;
+
+const safeUnregisterCode = `// Safe unregistration during initialization
+const dbPlugin = {
+  name: 'database',
+  install(kernel) { /* ... */ },
+  async onInit() {
+    // Open database connection (takes time)
+    this.connection = await openConnection();
+  },
+  async onDestroy() {
+    // Close connection to prevent leaks
+    await this.connection?.close();
+  }
+};
+
+kernel.use(dbPlugin);
+// Plugin is now initializing (opening connection)
+
+// Safe: unregisterAsync waits for init, then calls onDestroy
+await kernel.unregisterAsync('database');
+// Connection is properly closed, no resource leak!
+
+// Note: sync unregister() also handles this but fire-and-forget
+kernel.unregister('database'); // Also safe, cleanup happens async`;
 
 const pluginFactoryCode = `import { definePlugin } from '@oxog/plugin';
 
@@ -124,6 +148,14 @@ export function Advanced() {
         Add, remove, replace, and reload plugins at runtime:
       </p>
       <CodeBlock code={dynamicPluginsCode} language="typescript" />
+
+      <h3 className="text-xl font-semibold mt-8 mb-4">Safe Unregistration</h3>
+      <p className="text-[hsl(var(--muted-foreground))] mb-4">
+        Unregistering a plugin that's still initializing is handled safely. The kernel waits for
+        initialization to complete, then calls <code className="text-[hsl(var(--primary))]">onDestroy</code> to
+        prevent resource leaks:
+      </p>
+      <CodeBlock code={safeUnregisterCode} language="typescript" />
 
       <h2 className="text-2xl font-semibold mt-12 mb-4">Configurable Plugin Factories</h2>
       <p className="text-[hsl(var(--muted-foreground))] mb-4">

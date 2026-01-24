@@ -106,6 +106,41 @@ describe('KernelInstance', () => {
       ).toThrowError(PluginError);
     });
 
+    it('should throw when adding plugin during initialization', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      let resolveInit: () => void;
+      const initPromise = new Promise<void>((resolve) => {
+        resolveInit = resolve;
+      });
+
+      // Plugin with slow init to keep kernel in Initializing state
+      kernel.use({
+        name: 'slow',
+        version: '1.0.0',
+        install: () => {},
+        async onInit() {
+          await initPromise;
+        }
+      } as any);
+
+      // Start init but don't await it
+      const initResult = kernel.init();
+
+      // Try to add plugin while initializing - should throw
+      expect(() =>
+        kernel.use(createTestPlugin('another') as any)
+      ).toThrowError(PluginError);
+
+      // Also verify error message
+      expect(() =>
+        kernel.use(createTestPlugin('another2') as any)
+      ).toThrow('Cannot add plugins while kernel is initializing');
+
+      // Cleanup: resolve the init
+      resolveInit!();
+      await initResult;
+    });
+
     it('should emit plugin:install event', () => {
       const kernel = new KernelInstance<TestContext, TestEvents>();
       const handler = vi.fn();
@@ -534,6 +569,92 @@ describe('KernelInstance', () => {
 
       expect(handler).not.toHaveBeenCalled();
     });
+
+    it('should allow subscribing to internal kernel events type-safely', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      const installHandler = vi.fn();
+      const initHandler = vi.fn();
+      const readyHandler = vi.fn();
+
+      // Users can subscribe to internal events with type-safe payloads
+      kernel.on('plugin:install', installHandler);
+      kernel.on('kernel:init', initHandler);
+      kernel.on('kernel:ready', readyHandler);
+
+      kernel.use({
+        name: 'test',
+        version: '1.0.0',
+        install: () => {}
+      } as any);
+
+      await kernel.init();
+
+      // Internal events have correct payload types
+      expect(installHandler).toHaveBeenCalledWith({ name: 'test', version: '1.0.0' });
+      expect(initHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ timestamp: expect.any(Number) })
+      );
+      expect(readyHandler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          timestamp: expect.any(Number),
+          plugins: ['test']
+        })
+      );
+    });
+
+    it('should emit plugin:init for dynamically added plugins', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      const pluginInitHandler = vi.fn();
+
+      await kernel.init();
+
+      // Subscribe to plugin:init
+      kernel.on('plugin:init', pluginInitHandler);
+
+      // Add plugin after kernel is ready (dynamic loading)
+      kernel.use({
+        name: 'dynamic',
+        version: '1.0.0',
+        install: () => {}
+      } as any);
+
+      // Wait for initialization to complete
+      await kernel.waitForPlugin('dynamic');
+
+      // plugin:init is emitted for dynamically added plugins
+      expect(pluginInitHandler).toHaveBeenCalledWith({ name: 'dynamic' });
+    });
+
+    it('should emit plugin:error for dynamically added plugins that fail', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>({
+        errorStrategy: 'isolate'
+      });
+      const errorHandler = vi.fn();
+
+      await kernel.init();
+
+      // Subscribe to plugin:error
+      kernel.on('plugin:error', errorHandler);
+
+      const error = new Error('Test error');
+      kernel.use({
+        name: 'failing',
+        version: '1.0.0',
+        install: () => {},
+        onInit() {
+          throw error;
+        }
+      } as any);
+
+      // Wait for plugin to finish (will fail)
+      await kernel.waitForPlugin('failing');
+
+      // plugin:error event has correct payload type
+      expect(errorHandler).toHaveBeenCalledWith({
+        name: 'failing',
+        error
+      });
+    });
   });
 
   describe('context', () => {
@@ -553,6 +674,49 @@ describe('KernelInstance', () => {
       kernel.updateContext({ value: 100 });
 
       expect(kernel.getContext()).toEqual({ value: 100 });
+    });
+
+    it('should deep update context preserving nested values', () => {
+      interface NestedContext { config: { db: string; api: string } }
+      interface NestedEvents { [key: string]: unknown }
+      const kernel = new KernelInstance<NestedContext, NestedEvents>({
+        context: { config: { db: 'localhost', api: 'http://localhost' } }
+      });
+
+      kernel.deepUpdateContext({ config: { db: 'postgres://prod' } } as any);
+
+      expect(kernel.getContext()).toEqual({
+        config: { db: 'postgres://prod', api: 'http://localhost' }
+      });
+    });
+
+    it('should deep update context with deeply nested objects', () => {
+      interface DeepContext {
+        level1: {
+          level2: { a: number; b: number };
+          sibling: string;
+        };
+      }
+      interface DeepEvents { [key: string]: unknown }
+      const kernel = new KernelInstance<DeepContext, DeepEvents>({
+        context: {
+          level1: {
+            level2: { a: 1, b: 2 },
+            sibling: 'keep'
+          }
+        }
+      });
+
+      kernel.deepUpdateContext({
+        level1: { level2: { a: 10 } }
+      } as any);
+
+      expect(kernel.getContext()).toEqual({
+        level1: {
+          level2: { a: 10, b: 2 },
+          sibling: 'keep'
+        }
+      });
     });
   });
 
@@ -593,6 +757,39 @@ describe('KernelInstance', () => {
       await kernel.unregister('test');
 
       expect(destroyed).toBe(true);
+    });
+
+    it('should cleanup initializing plugin to prevent resource leak', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      let initCompleted = false;
+      let destroyCalled = false;
+
+      kernel.use(createTestPlugin('base'));
+      await kernel.init();
+
+      // Add slow plugin (starts initializing)
+      kernel.use({
+        name: 'slow',
+        version: '1.0.0',
+        install(_k) {},
+        async onInit() {
+          await new Promise((r) => setTimeout(r, 50));
+          initCompleted = true;
+        },
+        async onDestroy() {
+          destroyCalled = true;
+        }
+      });
+
+      // Unregister while still initializing (sync version - fire and forget)
+      kernel.unregister('slow');
+
+      // Wait for cleanup to complete
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(initCompleted).toBe(true);
+      expect(destroyCalled).toBe(true);
+      expect(kernel.hasPlugin('slow')).toBe(false);
     });
   });
 
@@ -825,6 +1022,96 @@ describe('KernelInstance', () => {
       expect(removed).toBe(true);
       expect(kernel.hasPlugin('test')).toBe(false);
     });
+
+    it('should wait for initializing plugin and call onDestroy (prevents zombie)', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      let initCompleted = false;
+      let destroyCalled = false;
+
+      kernel.use(createTestPlugin('base'));
+      await kernel.init();
+
+      // Add slow plugin (starts initializing)
+      kernel.use({
+        name: 'slow',
+        version: '1.0.0',
+        install(_k: any) {},
+        async onInit() {
+          await new Promise((r) => setTimeout(r, 50));
+          initCompleted = true;
+        },
+        async onDestroy() {
+          destroyCalled = true;
+        }
+      });
+
+      // Unregister while still initializing - should wait and cleanup
+      const removed = await kernel.unregisterAsync('slow');
+
+      expect(removed).toBe(true);
+      expect(initCompleted).toBe(true);
+      expect(destroyCalled).toBe(true);
+      expect(kernel.hasPlugin('slow')).toBe(false);
+    });
+
+    it('should call onDestroy even if init failed', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      let destroyCalled = false;
+
+      kernel.use(createTestPlugin('base'));
+      await kernel.init();
+
+      // Add plugin that fails during init
+      kernel.use({
+        name: 'failing',
+        version: '1.0.0',
+        install(_k: any) {},
+        async onInit() {
+          throw new Error('Init failed');
+        },
+        async onDestroy() {
+          destroyCalled = true;
+        }
+      });
+
+      // Wait a bit for init to fail
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Unregister - should still call onDestroy for cleanup
+      await kernel.unregisterAsync('failing');
+
+      expect(destroyCalled).toBe(true);
+    });
+
+    it('should handle unregisterAsync when init throws during wait', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      let destroyCalled = false;
+
+      kernel.use(createTestPlugin('base'));
+      await kernel.init();
+
+      // Add plugin that will fail during init but takes time to fail
+      kernel.use({
+        name: 'slow-failing',
+        version: '1.0.0',
+        install(_k: any) {},
+        async onInit() {
+          await new Promise((r) => setTimeout(r, 30));
+          throw new Error('Init failed after delay');
+        },
+        async onDestroy() {
+          destroyCalled = true;
+        }
+      });
+
+      // Immediately try to unregister while init is still pending
+      // This tests the catch block that ignores init errors during unregister
+      const removed = await kernel.unregisterAsync('slow-failing');
+
+      expect(removed).toBe(true);
+      expect(destroyCalled).toBe(true);
+      expect(kernel.hasPlugin('slow-failing')).toBe(false);
+    });
   });
 
   describe('replace', () => {
@@ -1009,6 +1296,141 @@ describe('KernelInstance', () => {
       await kernel.waitForAll();
       // Should not throw
     });
+  });
+
+  describe('dynamic plugin dependency validation', () => {
+    it('should throw on missing dependency when adding plugin to ready kernel', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+
+      // Initialize kernel with a simple plugin
+      kernel.use(createTestPlugin('base'));
+      await kernel.init();
+
+      // Try to add plugin with missing dependency
+      const pluginWithMissingDep = {
+        name: 'dependent',
+        version: '1.0.0',
+        dependencies: ['nonexistent'],
+        install(_kernel: any) {},
+        async onInit() {}
+      };
+
+      expect(() => kernel.use(pluginWithMissingDep)).toThrow(PluginError);
+    });
+
+    it('should wait for pending dependency before initializing', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      const initOrder: string[] = [];
+
+      kernel.use(createTestPlugin('base'));
+      await kernel.init();
+
+      // Add dependency plugin (slow init)
+      const depPlugin = {
+        name: 'dep',
+        version: '1.0.0',
+        install(_kernel: any) {},
+        async onInit() {
+          await new Promise((r) => setTimeout(r, 20));
+          initOrder.push('dep');
+        }
+      };
+
+      // Add dependent plugin
+      const dependentPlugin = {
+        name: 'dependent',
+        version: '1.0.0',
+        dependencies: ['dep'],
+        install(_kernel: any) {},
+        async onInit() {
+          initOrder.push('dependent');
+        }
+      };
+
+      kernel.use(depPlugin);
+      kernel.use(dependentPlugin);
+
+      await kernel.waitForAll();
+
+      // Dependency should initialize before dependent
+      expect(initOrder).toEqual(['dep', 'dependent']);
+    });
+
+    it('should fail initialization if dependency is in failed state', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      const errors: { name: string; error: Error }[] = [];
+
+      kernel.onWildcard((event, payload) => {
+        if (event === 'plugin:error') {
+          errors.push(payload as { name: string; error: Error });
+        }
+      });
+
+      kernel.use(createTestPlugin('base'));
+      await kernel.init();
+
+      // Add failing dependency
+      const failingDep = {
+        name: 'failing-dep',
+        version: '1.0.0',
+        install(_kernel: any) {},
+        async onInit() {
+          throw new Error('Dep init failed');
+        }
+      };
+
+      // Add dependent plugin
+      const dependentPlugin = {
+        name: 'dependent',
+        version: '1.0.0',
+        dependencies: ['failing-dep'],
+        install(_kernel: any) {},
+        async onInit() {}
+      };
+
+      kernel.use(failingDep);
+      kernel.use(dependentPlugin);
+
+      await kernel.waitForAll();
+
+      // Both should have errors
+      expect(errors.length).toBeGreaterThanOrEqual(1);
+      expect(errors.some((e) => e.name === 'failing-dep')).toBe(true);
+      expect(errors.some((e) => e.name === 'dependent')).toBe(true);
+    });
+
+    it('should successfully initialize plugin when dependency is ready', async () => {
+      const kernel = new KernelInstance<TestContext, TestEvents>();
+      let dependentInitialized = false;
+
+      // Initialize kernel with dependency already loaded
+      const depPlugin = {
+        name: 'dep',
+        version: '1.0.0',
+        install(_kernel: any) {},
+        async onInit() {}
+      };
+
+      kernel.use(depPlugin);
+      await kernel.init();
+
+      // Add dependent plugin after kernel is ready
+      const dependentPlugin = {
+        name: 'dependent',
+        version: '1.0.0',
+        dependencies: ['dep'],
+        install(_kernel: any) {},
+        async onInit() {
+          dependentInitialized = true;
+        }
+      };
+
+      kernel.use(dependentPlugin);
+      await kernel.waitForPlugin('dependent');
+
+      expect(dependentInitialized).toBe(true);
+    });
+
   });
 
   describe('plugin error events', () => {

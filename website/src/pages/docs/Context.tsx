@@ -40,10 +40,27 @@ const updateContextCode = `// Get context from outside
 const ctx = kernel.getContext();
 console.log(ctx.config.apiUrl);
 
-// Update context
+// Shallow update (replaces nested objects entirely)
 kernel.updateContext({
   config: { ...ctx.config, timeout: 10000 }
 });`;
+
+const deepUpdateCode = `// Deep update (preserves nested values)
+// Only updates specified properties, keeps others intact
+
+interface Context {
+  config: { db: string; api: string; cache: string };
+}
+
+// Initial: { config: { db: 'localhost', api: 'http://localhost', cache: 'memory' } }
+
+// With updateContext (SHALLOW) - loses api and cache!
+kernel.updateContext({ config: { db: 'postgres://prod' } });
+// Result: { config: { db: 'postgres://prod' } } // api and cache are LOST!
+
+// With deepUpdateContext (DEEP) - preserves api and cache
+kernel.deepUpdateContext({ config: { db: 'postgres://prod' } });
+// Result: { config: { db: 'postgres://prod', api: 'http://localhost', cache: 'memory' } }`;
 
 const sharedStateCode = `interface AppContext {
   state: {
@@ -108,9 +125,25 @@ export function Context() {
 
       <h2 className="text-2xl font-semibold mt-12 mb-4">Updating Context</h2>
       <p className="text-[hsl(var(--muted-foreground))] mb-4">
-        Context can be updated with partial values:
+        Context can be updated with partial values. Use <code className="text-[hsl(var(--primary))]">updateContext()</code> for
+        shallow merges (top-level properties only):
       </p>
       <CodeBlock code={updateContextCode} language="typescript" />
+
+      <h3 className="text-xl font-semibold mt-8 mb-4">Deep Updates</h3>
+      <p className="text-[hsl(var(--muted-foreground))] mb-4">
+        For nested objects, use <code className="text-[hsl(var(--primary))]">deepUpdateContext()</code> to
+        recursively merge without losing existing nested values:
+      </p>
+      <CodeBlock code={deepUpdateCode} language="typescript" />
+
+      <div className="bg-[hsl(var(--muted))] rounded-lg p-4 mt-4 mb-8">
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">
+          <strong className="text-[hsl(var(--foreground))]">Note:</strong> Arrays are replaced, not merged, in both methods.
+          Use <code className="text-[hsl(var(--primary))]">deepUpdateContext()</code> when you have nested configuration
+          objects and want to update specific nested properties without losing sibling values.
+        </p>
+      </div>
 
       <h2 className="text-2xl font-semibold mt-12 mb-4">Shared State Pattern</h2>
       <p className="text-[hsl(var(--muted-foreground))] mb-4">

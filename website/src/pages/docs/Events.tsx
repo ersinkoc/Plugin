@@ -26,7 +26,14 @@ unsubscribe();`;
 const onceCode = `// Subscribe once (auto-unsubscribes after first event)
 kernel.once('user:logout', (payload) => {
   console.log(\`User \${payload.userId} logged out\`);
-});`;
+});
+
+// You can also cancel a once subscription before it fires
+const handler = (payload) => console.log('Ready!', payload);
+kernel.once('app:ready', handler);
+
+// Cancel before the event fires
+kernel.off('app:ready', handler); // Works correctly with once()`;
 
 const wildcardCode = `// Subscribe to all events
 kernel.onWildcard((event, payload) => {

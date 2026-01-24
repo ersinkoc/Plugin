@@ -66,6 +66,46 @@ export class DependencyResolver {
   }
 
   /**
+   * Validate dependencies for a single plugin.
+   *
+   * Checks that all dependencies exist in the graph and that adding
+   * this plugin doesn't create circular dependencies.
+   *
+   * @param name - Plugin name to validate
+   * @throws {PluginError} If missing dependencies detected
+   * @throws {PluginError} If circular dependencies detected
+   *
+   * @example
+   * ```typescript
+   * resolver.validateSinglePlugin('api');
+   * // Throws if 'api' has missing or circular dependencies
+   * ```
+   */
+  validateSinglePlugin(name: string): void {
+    const deps = this.graph.get(name);
+    if (!deps) return;
+
+    // Check for missing dependencies
+    for (const dep of deps) {
+      if (!this.graph.has(dep)) {
+        throw new PluginError(
+          `Missing dependency: '${dep}' required by '${name}'`,
+          name
+        );
+      }
+    }
+
+    // Check for circular dependencies involving this plugin
+    const cycle = this.detectCycle();
+    if (cycle && cycle.includes(name)) {
+      throw new PluginError(
+        `Circular dependency detected: ${cycle.join(' -> ')}`,
+        'dependency-resolver'
+      );
+    }
+  }
+
+  /**
    * Resolve the plugin initialization order.
    *
    * Uses Kahn's algorithm for topological sorting. Throws if

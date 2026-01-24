@@ -49,6 +49,13 @@ export class EventBus<TEvents extends EventMap> {
   private patternHandlers = new Map<string, Array<PatternHandler>>();
 
   /**
+   * Maps original handlers to their wrapped versions for once() subscriptions.
+   * Key format: "eventName:handlerIndex" -> wrapped handler
+   * This allows off() to work correctly with once() subscriptions.
+   */
+  private onceWrappers = new Map<EventHandler<unknown>, EventHandler<unknown>>();
+
+  /**
    * Subscribe to a specific event.
    *
    * @param event - Event name
@@ -95,6 +102,7 @@ export class EventBus<TEvents extends EventMap> {
    * Subscribe to an event for a single emission.
    *
    * The handler is automatically removed after the first event.
+   * You can also manually unsubscribe using off() with the original handler.
    *
    * @param event - Event name
    * @param handler - Event handler function
@@ -105,21 +113,38 @@ export class EventBus<TEvents extends EventMap> {
    * bus.once('app:ready', () => {
    *   console.log('App is ready!');
    * });
+   *
+   * // Can also be cancelled before firing:
+   * const handler = () => console.log('ready');
+   * bus.once('app:ready', handler);
+   * bus.off('app:ready', handler); // Works correctly
    * ```
    */
   once<K extends keyof TEvents>(
     event: K,
     handler: EventHandler<TEvents[K]>
   ): Unsubscribe {
+    const typedHandler = handler as EventHandler<unknown>;
+
     const wrapped: EventHandler<TEvents[K]> = (payload) => {
-      handler(payload);
+      // Clean up the mapping
+      this.onceWrappers.delete(typedHandler);
+      // Remove from handlers using wrapped (which is what's registered)
       this.off(event, wrapped);
+      // Call original handler
+      handler(payload);
     };
+
+    // Store mapping so off() can find the wrapper
+    this.onceWrappers.set(typedHandler, wrapped as EventHandler<unknown>);
+
     return this.on(event, wrapped);
   }
 
   /**
    * Unsubscribe a specific event handler.
+   *
+   * Works with both on() and once() subscriptions.
    *
    * @param event - Event name
    * @param handler - Handler to remove
@@ -129,6 +154,10 @@ export class EventBus<TEvents extends EventMap> {
    * const handler = (payload) => console.log(payload);
    * bus.on('event', handler);
    * bus.off('event', handler);
+   *
+   * // Also works with once():
+   * bus.once('event', handler);
+   * bus.off('event', handler); // Cancels the once subscription
    * ```
    */
   off<K extends keyof TEvents>(
@@ -137,9 +166,19 @@ export class EventBus<TEvents extends EventMap> {
   ): void {
     const handlers = this.handlers.get(String(event));
     if (handlers) {
-      const index = handlers.indexOf(handler as EventHandler<unknown>);
+      const typedHandler = handler as EventHandler<unknown>;
+
+      // Check if this handler has a once() wrapper
+      const wrappedHandler = this.onceWrappers.get(typedHandler);
+      const handlerToRemove = wrappedHandler || typedHandler;
+
+      const index = handlers.indexOf(handlerToRemove);
       if (index !== -1) {
         handlers.splice(index, 1);
+        // Clean up the wrapper mapping if it was a once() handler
+        if (wrappedHandler) {
+          this.onceWrappers.delete(typedHandler);
+        }
       }
     }
   }
@@ -271,6 +310,7 @@ export class EventBus<TEvents extends EventMap> {
     this.handlers.clear();
     this.wildcardHandlers.length = 0;
     this.patternHandlers.clear();
+    this.onceWrappers.clear();
   }
 
   /**

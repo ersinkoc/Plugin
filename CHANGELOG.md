@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-01-25
+
+### Fixed
+
+- **Dynamic Plugin Dependency Validation**
+  - Plugins added after `init()` now properly validate dependencies before initialization
+  - Missing dependencies throw `PluginError` immediately when calling `use()` on ready kernel
+  - Circular dependencies involving dynamically added plugins are now detected
+  - Dependent plugins wait for their dependencies to complete initialization
+  - If a dependency fails to initialize, dependent plugins are marked as failed with `plugin:error` event
+
+- **Zombie Plugin Resource Leak Prevention**
+  - `unregister()` and `unregisterAsync()` now properly handle plugins in `Initializing` state
+  - When unregistering an initializing plugin, the system waits for init to complete then calls `onDestroy`
+  - `onDestroy` is now called even if `onInit` failed, ensuring resource cleanup
+  - Prevents memory leaks from orphaned resources (DB connections, event listeners, etc.)
+
+- **EventBus.once() Subscription Cancellation**
+  - `off()` now correctly removes `once()` subscriptions using the original handler reference
+  - Previously, calling `off(event, handler)` after `once(event, handler)` would silently fail
+  - Internal wrapper mapping tracks original handlers for proper cleanup
+
+- **Plugin Registration During Initialization**
+  - `use()` now throws `PluginError` when called while kernel is in `Initializing` state
+  - Previously, plugins added during initialization would be silently ignored (never initialized)
+  - Clear error message guides users to register plugins before `init()` or wait until ready
+
+- **Internal Events Type-Safety**
+  - Removed unsafe `unknown` type cast when emitting internal kernel events
+  - EventBus now uses combined type `CombinedEvents<TEvents>` for type-safe internal events
+  - Users can subscribe to internal events (`plugin:install`, `kernel:ready`, etc.) with full type inference
+  - Internal event names are protected: user-defined events with same names use internal event types
+  - Prevents runtime type mismatches when subscribing to internal events
+
+### Added
+
+- **DependencyResolver.validateSinglePlugin()**
+  - New method to validate a single plugin's dependencies
+  - Used internally for dynamic plugin validation
+  - Checks for missing dependencies and circular references
+
+- **Deep Context Merge**
+  - `deepUpdateContext()` method for recursive nested object merging
+  - Prevents data loss when updating nested configuration objects
+  - `updateContext()` remains unchanged (shallow merge) for backward compatibility
+  - Arrays are replaced, not merged (consistent with common deep merge behavior)
+
+### Technical Details
+
+- 245 tests with 100% code coverage
+- No breaking changes from 1.0.1
+
 ## [1.0.1] - 2026-01-16
 
 ### Added
@@ -104,5 +156,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - < 4KB gzipped core bundle
 - 100% test coverage (210 tests)
 
+[1.0.2]: https://github.com/ersinkoc/plugin/releases/tag/v1.0.2
 [1.0.1]: https://github.com/ersinkoc/plugin/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ersinkoc/plugin/releases/tag/v1.0.0

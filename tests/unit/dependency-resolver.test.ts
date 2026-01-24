@@ -200,6 +200,59 @@ describe('DependencyResolver', () => {
     });
   });
 
+  describe('validateSinglePlugin', () => {
+    it('should not throw for valid plugin with no dependencies', () => {
+      const resolver = new DependencyResolver();
+      resolver.addPlugin('a', []);
+
+      expect(() => resolver.validateSinglePlugin('a')).not.toThrow();
+    });
+
+    it('should not throw for plugin with satisfied dependencies', () => {
+      const resolver = new DependencyResolver();
+      resolver.addPlugin('a', []);
+      resolver.addPlugin('b', ['a']);
+
+      expect(() => resolver.validateSinglePlugin('b')).not.toThrow();
+    });
+
+    it('should throw for missing dependency', () => {
+      const resolver = new DependencyResolver();
+      resolver.addPlugin('a', ['missing']);
+
+      expect(() => resolver.validateSinglePlugin('a')).toThrow(PluginError);
+      expect(() => resolver.validateSinglePlugin('a')).toThrow(
+        "Missing dependency: 'missing' required by 'a'"
+      );
+    });
+
+    it('should throw for circular dependency involving the plugin', () => {
+      const resolver = new DependencyResolver();
+      resolver.addPlugin('a', ['b']);
+      resolver.addPlugin('b', ['a']);
+
+      expect(() => resolver.validateSinglePlugin('a')).toThrow(PluginError);
+      expect(() => resolver.validateSinglePlugin('a')).toThrow(/Circular dependency detected/);
+    });
+
+    it('should throw for complex circular dependency involving the plugin', () => {
+      const resolver = new DependencyResolver();
+      resolver.addPlugin('a', ['b']);
+      resolver.addPlugin('b', ['c']);
+      resolver.addPlugin('c', ['a']); // a -> b -> c -> a
+
+      expect(() => resolver.validateSinglePlugin('a')).toThrow(PluginError);
+      expect(() => resolver.validateSinglePlugin('b')).toThrow(PluginError);
+      expect(() => resolver.validateSinglePlugin('c')).toThrow(PluginError);
+    });
+
+    it('should return early if plugin has no dependencies', () => {
+      const resolver = new DependencyResolver();
+      // Plugin not in graph - should return early
+      expect(() => resolver.validateSinglePlugin('nonexistent')).not.toThrow();
+    });
+  });
+
   describe('detectCycle', () => {
     it('should return null for acyclic graph', () => {
       const resolver = new DependencyResolver();
