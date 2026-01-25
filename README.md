@@ -113,7 +113,8 @@ Creates a new micro-kernel instance.
 | `onWildcard(handler)` | Subscribe to all events |
 | `onPattern(pattern, handler)` | Subscribe to pattern |
 | `getContext()` | Get shared context |
-| `updateContext(partial)` | Update context |
+| `updateContext(partial)` | Shallow update context |
+| `deepUpdateContext(partial)` | Deep merge context |
 | `unregister(name)` | Remove plugin |
 | `replace(plugin)` | Replace plugin |
 | `reload(name)` | Reload plugin |

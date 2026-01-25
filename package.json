@@ -1,6 +1,6 @@
 {
   "name": "@oxog/plugin",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Micro-kernel plugin system for the @oxog ecosystem with typed events, lifecycle hooks, and dependency resolution.",
   "type": "module",
   "main": "./dist/index.js",

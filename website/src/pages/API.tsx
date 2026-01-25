@@ -23,7 +23,8 @@ const kernelInterfaceCode = `interface KernelInstance<TContext, TEvents> {
   // Plugin Management
   use(plugin: Plugin<TContext>): this;
   useAll(plugins: Plugin<TContext>[]): this;
-  unregister(name: string): Promise<boolean>;
+  unregister(name: string): boolean;
+  unregisterAsync(name: string): Promise<boolean>;
   replace(plugin: Plugin<TContext>): Promise<void>;
   reload(name: string): Promise<void>;
   waitForPlugin(name: string): Promise<void>;
@@ -42,7 +43,7 @@ const kernelInterfaceCode = `interface KernelInstance<TContext, TEvents> {
   getPluginNames(): string[];
   getDependencyGraph(): Record<string, string[]>;
 
-  // Events
+  // Events (includes internal events like plugin:init, kernel:ready)
   on<K extends keyof TEvents>(event: K, handler: (payload: TEvents[K]) => void): Unsubscribe;
   once<K extends keyof TEvents>(event: K, handler: (payload: TEvents[K]) => void): Unsubscribe;
   off<K extends keyof TEvents>(event: K, handler: (payload: TEvents[K]) => void): void;
@@ -53,6 +54,7 @@ const kernelInterfaceCode = `interface KernelInstance<TContext, TEvents> {
   // Context
   getContext(): TContext;
   updateContext(partial: Partial<TContext>): void;
+  deepUpdateContext(partial: Partial<TContext>): void;
 }`;
 
 export function API() {

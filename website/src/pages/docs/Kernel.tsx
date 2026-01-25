@@ -136,11 +136,19 @@ export function Kernel() {
       <h3 className="text-xl font-semibold mt-8 mb-4">Lifecycle States</h3>
       <ul className="list-disc list-inside text-[hsl(var(--muted-foreground))] space-y-2">
         <li><strong className="text-[hsl(var(--foreground))]">Created</strong> - Initial state, plugins can be registered</li>
-        <li><strong className="text-[hsl(var(--foreground))]">Initializing</strong> - Plugins are being initialized</li>
-        <li><strong className="text-[hsl(var(--foreground))]">Ready</strong> - All plugins initialized, kernel is active</li>
+        <li><strong className="text-[hsl(var(--foreground))]">Initializing</strong> - Plugins are being initialized (new plugins cannot be added)</li>
+        <li><strong className="text-[hsl(var(--foreground))]">Ready</strong> - All plugins initialized, kernel is active (dynamic plugins allowed)</li>
         <li><strong className="text-[hsl(var(--foreground))]">Destroying</strong> - Plugins are being destroyed</li>
         <li><strong className="text-[hsl(var(--foreground))]">Destroyed</strong> - Kernel is no longer usable</li>
       </ul>
+
+      <div className="bg-[hsl(var(--muted))] rounded-lg p-4 mt-4">
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">
+          <strong className="text-[hsl(var(--foreground))]">Note:</strong> You cannot call <code className="text-[hsl(var(--primary))]">use()</code> while
+          the kernel is in the <code className="text-[hsl(var(--primary))]">Initializing</code> state. Register all plugins before
+          calling <code className="text-[hsl(var(--primary))]">init()</code>, or wait until the kernel is <code className="text-[hsl(var(--primary))]">Ready</code>.
+        </p>
+      </div>
     </article>
   );
 }
